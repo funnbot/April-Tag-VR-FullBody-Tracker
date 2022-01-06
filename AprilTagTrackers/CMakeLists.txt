@@ -1,10 +1,33 @@
 ﻿# CMakeList.txt : CMake project for AprilTagTrackers, include source and define
 # project specific logic here.
 #
+cmake_minimum_required(VERSION 3.8)
+
+# Find prebuilt libraries
+find_package(OpenCV REQUIRED)
+if (NOT ${OpenCV_opencv_aruco_FOUND})
+    message(FATAL_ERROR "Missing Aruco module. Rebuild OpenCV with modules from opencv_contrib")
+endif()
 
 # Add source to this project's executable.
-file(GLOB attSOURCE "*.cpp" "*.h")
-add_executable(AprilTagTrackers ${attSOURCE})
+file(GLOB source "*.cpp" "*.h")
+add_executable (AprilTagTrackers ${source})
 
-target_include_directories(AprilTagTrackers PUBLIC ${OPENVR_INCLUDE_DIR} ${APRILTAG_INCLUDE_DIR})
-target_link_libraries(AprilTagTrackers ${OpenCV_LIBS} ${OpenVRSDK} apriltag wx::net wx::core wx::base)
+# Link paths to libraries
+target_link_libraries(AprilTagTrackers PUBLIC ${OpenVR_LIBS})
+target_include_directories(AprilTagTrackers PUBLIC ${OpenVR_INCLUDE_DIR})
+
+# Link libraries defined as targets, includes are automatic
+target_link_libraries(AprilTagTrackers PUBLIC ${OpenCV_LIBS} apriltags wx::net wx::core wx::base)
+
+if (MSVC)
+    # tell the msvc linker this is a windows application
+    set_target_properties(AprilTagTrackers PROPERTIES LINK_FLAGS /SUBSYSTEM:WINDOWS)
+endif()
+
+# fix for creating debug builds with a release build of opencv
+target_compile_definitions(AprilTagTrackers PUBLIC 
+    $<$<CONFIG:Debug>:CV_IGNORE_DEBUG_BUILD_GUARD>)
+
+# Install target to bin folder
+install(TARGETS AprilTagTrackers RUNTIME)

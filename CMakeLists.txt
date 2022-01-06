@@ -3,28 +3,25 @@
 #
 cmake_minimum_required (VERSION 3.8)
 
-project ("AprilTagTrackers")
+project("AprilTagTrackers")
 
-#only supported for now
-set(PLATFORM_NAME "win")
-set(PROCESSOR_ARCH "64")
+# Force wxWidgets to build as a static library
+set(wxBUILD_SHARED "0")
 
-set(wxBUILD_SHARED "0" CACHE BOOL "")
-set(BUILD_SHARED_LIBS "0" CACHE BOOL "")
+# Include subprojects, but exclude them from ALL_BUILD 
+# as they may have extra unnecessary targets
+add_subdirectory("apriltag" EXCLUDE_FROM_ALL)
+add_subdirectory("wxWidgets" EXCLUDE_FROM_ALL)
+add_subdirectory("openvr" EXCLUDE_FROM_ALL)
 
-# Find prebuilt libraries
-find_package(OpenCV REQUIRED PATHS "opencv/build/install")
-#    OpenVR does not include any generated cmake files, but the paths are always known
-find_library(OpenVRSDK openvr_api REQUIRED PATHS "${CMAKE_CURRENT_SOURCE_DIR}/openvr/lib/${PLATFORM_NAME}${PROCESSOR_ARCH}" NO_DEFAULT_PATH)
-set(OPENVR_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/openvr/headers")
+# Hacky way to get openvr lib, as the main repo has been broken for months
+# TODO: fork openvr to fix build errors
+get_directory_property(PLATFORM_NAME DIRECTORY "openvr" DEFINITION "PLATFORM_NAME")
+get_directory_property(PROCESSOR_ARCH DIRECTORY "openvr" DEFINITION "PROCESSOR_ARCH")
+set(OpenVR_LIBS "${CMAKE_CURRENT_SOURCE_DIR}/openvr/lib/${PLATFORM_NAME}${PROCESSOR_ARCH}/openvr_api.lib")
+set(OpenVR_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/openvr/headers")
 
-# Find libraries to build
-add_subdirectory("apriltag")
-set(APRILTAG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/apriltag")
-add_subdirectory("wxWidgets")
+# Include main project
 add_subdirectory("AprilTagTrackers")
 
-install(TARGETS AprilTagTrackers RUNTIME DESTINATION bin)
-
 set_property(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY VS_STARTUP_PROJECT AprilTagTrackers)
-set_target_properties("AprilTagTrackers" PROPERTIES LINK_FLAGS /SUBSYSTEM:WINDOWS )
