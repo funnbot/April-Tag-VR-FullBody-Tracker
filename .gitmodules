@@ -1,10 +1,9 @@
-[submodule "apriltag"]
-	path = apriltag
-	url = https://github.com/rasmusgo/apriltag.git
-	branch = fixPullRequestLibraryName
 [submodule "wxWidgets"]
 	path = wxWidgets
 	url = https://github.com/wxWidgets/wxWidgets.git
 [submodule "openvr"]
 	path = openvr
 	url = https://github.com/ValveSoftware/openvr.git
+[submodule "apriltag"]
+	path = apriltag
+	url = https://github.com/funnbot/apriltag
