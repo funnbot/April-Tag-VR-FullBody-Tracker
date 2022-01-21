@@ -18,16 +18,12 @@ target_link_libraries(AprilTagTrackers PUBLIC ${OpenVR_LIBS})
 target_include_directories(AprilTagTrackers PUBLIC ${OpenVR_INCLUDE_DIR})
 
 # Link libraries defined as targets, includes are automatic
-target_link_libraries(AprilTagTrackers PUBLIC ${OpenCV_LIBS} apriltags wx::net wx::core wx::base)
+target_link_libraries(AprilTagTrackers PUBLIC ${OpenCV_LIBS} apriltag wx::net wx::core wx::base)
 
 if (MSVC)
     # tell the msvc linker this is a windows application
     set_target_properties(AprilTagTrackers PROPERTIES LINK_FLAGS /SUBSYSTEM:WINDOWS)
 endif()
-
-# fix for creating debug builds with a release build of opencv
-target_compile_definitions(AprilTagTrackers PUBLIC 
-    $<$<CONFIG:Debug>:CV_IGNORE_DEBUG_BUILD_GUARD>)
 
 # Install target to bin folder
 install(TARGETS AprilTagTrackers RUNTIME)

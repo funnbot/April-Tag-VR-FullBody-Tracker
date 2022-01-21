@@ -7,6 +7,8 @@ project("AprilTagTrackers")
 
 # Force wxWidgets to build as a static library
 set(wxBUILD_SHARED "0")
+# Force apriltag to build as a static library
+set(BUILD_SHARED_LIBS "0")
 
 # Include subprojects, but exclude them from ALL_BUILD 
 # as they may have extra unnecessary targets
