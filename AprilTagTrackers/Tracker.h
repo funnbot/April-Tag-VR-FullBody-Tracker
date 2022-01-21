@@ -10,16 +10,31 @@
 #include <opencv2/core.hpp>
 #include <opencv2/videoio.hpp>
 
+#include <WinSock2.h>
+
 #include "MyApp.h"
 
 #include "Quaternion.h"
 
+constexpr bool NO_STEAM_MODE = true;
 
 struct TrackerStatus {
     cv::Vec3d boardRvec, boardTvec, boardTvecDriver;
     bool boardFound, boardFoundDriver;
     std::vector<std::vector<double>> prevLocValues;
     cv::Point2d maskCenter;
+};
+
+struct UDP_Server {
+    const int PORT = 7709;
+    SOCKET socket;
+    struct sockaddr_in addr;
+    WSADATA wsa;
+
+    std::mutex mutex;
+    std::vector<int> ids;
+    std::vector<std::vector<cv::Point2f>> corners;
+    std::vector<cv::Point2f> centers;
 };
 
 class Connection;
@@ -45,6 +60,8 @@ public:
     bool multicamAutocalib = false;
     bool lockHeightCalib = false;
     bool disableOut = false;
+
+    UDP_Server server{};
 
     GUI* gui;
 

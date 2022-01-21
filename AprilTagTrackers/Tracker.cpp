@@ -71,12 +71,12 @@ void previewCalibration(
     if (!cameraMatrix.empty())
     {
         const float gridZ = 10.0f;
-        const float width = drawImg.cols;
-        const float height = drawImg.rows;
-        const float fx = cameraMatrix(0, 0);
-        const float fy = cameraMatrix(1, 1);
-        const int gridSizeX = std::round(gridZ * width / fx);
-        const int gridSizeY = std::round(gridZ * height / fy);
+        const float width = static_cast<float>(drawImg.cols);
+        const float height = static_cast<float>(drawImg.rows);
+        const float fx = static_cast<float>(cameraMatrix(0, 0));
+        const float fy = static_cast<float>(cameraMatrix(1, 1));
+        const int gridSizeX = static_cast<int>(std::round(gridZ * width / fx));
+        const int gridSizeY = static_cast<int>(std::round(gridZ * height / fy));
         const std::vector<std::vector<cv::Point3f>> gridLinesInCamera = createXyGridLines(gridSizeX, gridSizeY, 10, gridZ);
         std::vector<cv::Point2f> gridLineInImage; // Will be populated by cv::projectPoints.
 
@@ -184,10 +184,38 @@ void Tracker::StartCamera(std::string id, int apiPreference)
     {
         cameraRunning = false;
         mainThreadRunning = false;
+
+        if (parameters->useApriltagIOS) {
+            closesocket(server.socket);
+            WSACleanup();
+        }
+ 
         //cameraThread.join();
         Sleep(1000);
         return;
     }
+
+    if (parameters->useApriltagIOS) {
+        if (WSAStartup(MAKEWORD(2, 2), &server.wsa) != 0) {
+            wxAbort();
+        }
+        if ((server.socket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) == SOCKET_ERROR) {
+            wxAbort();
+        }
+        server.addr.sin_family = AF_INET;
+        server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        server.addr.sin_port = htons(server.PORT);
+        if (bind(server.socket, (SOCKADDR *)&server.addr, sizeof(server.addr)) == SOCKET_ERROR) {
+            wxAbort();
+        }
+
+        cameraRunning = true;
+        cameraThread = std::thread(&Tracker::CameraLoop, this);
+        cameraThread.detach();
+
+        return;
+    }
+
     if (id.length() <= 2)		//if camera address is a single character, try to open webcam
     {
         int i = std::stoi(id);	//convert to int
@@ -232,8 +260,102 @@ void Tracker::StartCamera(std::string id, int apiPreference)
     cameraThread.detach();
 }
 
+static inline uint32_t udpReadInt(uint8_t* *const idx_ptr) {
+    const uint8_t* idx = *idx_ptr;
+    const uint32_t val = static_cast<uint32_t>(idx[0] << 24 | idx[1] << 16 | idx[2] << 8 | idx[3]);
+    *idx_ptr += 4;
+    return val;
+}
+
+static inline float udpReadFloat(uint8_t* *const idx_ptr) {
+    const uint32_t bytes = udpReadInt(idx_ptr);
+    const float val = *reinterpret_cast<const float*>(&bytes);
+    return val;
+}
+
 void Tracker::CameraLoop()
 {
+    if (parameters->useApriltagIOS) {
+        double fps = 0;
+        last_frame_time = clock();
+        bool frame_visible = false;
+
+        struct sockaddr_in client_addr;
+        int siaddr_size = sizeof(client_addr);
+
+        int recv_len = 0;
+        constexpr int buffer_len = 512;
+        uint8_t buf[buffer_len];
+
+        while (cameraRunning) {
+            memset(&buf, '\0', buffer_len);
+            if ((recv_len = recvfrom(server.socket, (char *)buf, buffer_len, 0, (SOCKADDR *)&client_addr, &siaddr_size)) == SOCKET_ERROR) {
+                break;
+            }
+
+            clock_t curtime = clock();
+            fps = 0.95*fps + 0.05/(double(curtime - last_frame_time) / double(CLOCKS_PER_SEC));
+            last_frame_time = curtime;
+
+            uint8_t* idx = buf;
+
+            auto m1 = udpReadInt(&idx);
+            auto m2 = udpReadInt(&idx);
+            auto v = udpReadInt(&idx);
+            
+            if (m1 == 0x41505249 && m2 == 0x4c544147 && v == 0x00010002) {
+                const std::lock_guard<std::mutex> lock(server.mutex);
+                server.ids.clear();
+                server.centers.clear();
+                server.corners.clear();
+
+                const uint32_t numTags = udpReadInt(&idx);
+                idx += 8; // utime
+
+                for (uint32_t t = 0; t < numTags; t++) {
+                    auto id = udpReadInt(&idx);
+                    server.ids.push_back(id);
+
+                    idx += 4; // hamming
+                    idx += 4; // decision
+
+                    auto cy = udpReadFloat(&idx);
+                    auto cx = parameters->camWidth - udpReadFloat(&idx);
+                    server.centers.push_back(cv::Point2f(cx, cy));
+
+                    server.corners.push_back(std::vector<cv::Point2f>());
+                    for (int i = 0; i < 4; i++) {
+                        auto y = udpReadFloat(&idx);
+                        auto x = parameters->camWidth - udpReadFloat(&idx);
+                        server.corners[t].push_back(cv::Point2f(x, y));
+                    }
+
+                    idx += 4 * 9; // homography
+                }
+            }
+
+            //process events. BETA TEST ONLY, MOVE TO CONNECTION LATER
+            if (connection->status == connection->CONNECTED)
+            {
+                vr::VREvent_t event;
+                while (connection->openvr_handle->PollNextEvent(&event, sizeof(event)))
+                {
+                    if (event.eventType == vr::VREvent_Quit)
+                    {
+                        connection->openvr_handle->AcknowledgeQuit_Exiting();       //close connection to steamvr without closing att
+                        connection->status = connection->DISCONNECTED;
+                        vr::VR_Shutdown();
+                        mainThreadRunning = false;
+                        break;
+                    }
+                }
+            }
+        } // while(cameraRunning)
+
+        cv::destroyAllWindows();
+        return;
+    } // USE_UDP
+
     bool rotate = false;
     int rotateFlag = -1;
     if (parameters->rotateCl && parameters->rotateCounterCl)
@@ -353,6 +475,8 @@ void Tracker::CopyFreshCameraImageTo(cv::Mat& image)
 
 void Tracker::StartCameraCalib()
 {
+    if (USE_UDP) return;
+
     if (mainThreadRunning)
     {
         mainThreadRunning = false;
@@ -377,6 +501,7 @@ void Tracker::StartCameraCalib()
 
 void Tracker::CalibrateCameraCharuco()
 {
+    if (USE_UDP) return;
     //function to calibrate our camera
 
     cv::Mat image;
@@ -530,7 +655,7 @@ void Tracker::CalibrateCameraCharuco()
                             std::cerr << "Failed to calibrate: " << e.what();
                         }
 
-                        int curI = perViewErrors.size();
+                        size_t curI = perViewErrors.size();
 
                     }
                 }
@@ -601,7 +726,6 @@ void Tracker::CalibrateCameraCharuco()
 
 void Tracker::CalibrateCamera()
 {
-
     int CHECKERBOARD[2]{ 7,7 };
 
     int blockSize = 125;
@@ -631,7 +755,7 @@ void Tracker::CalibrateCamera()
     {
         for (int j{ 0 }; j < CHECKERBOARD[1]; j++)
         {
-            objp.push_back(cv::Point3f(j, i, 0));
+            objp.push_back(cv::Point3f(static_cast<float>(j), static_cast<float>(i), 0));
         }
     }
 
@@ -759,6 +883,14 @@ void Tracker::Start()
         mainThreadRunning = false;
         return;
     }
+
+    if (parameters->useApriltagIOS) {
+        mainThreadRunning = true;
+        mainThread = std::thread(&Tracker::MainLoop, this);
+        mainThread.detach();
+        return;
+    }
+
     if (!cameraRunning)
     {
         wxMessageDialog dial(NULL,
@@ -804,7 +936,7 @@ void Tracker::CalibrateTracker()
 
     //making a marker model of our markersize for later use
     std::vector<cv::Point3f> modelMarker;
-    double markerSize = parameters->markerSize;
+    float markerSize = static_cast<float>(parameters->markerSize);
     modelMarker.push_back(cv::Point3f(-markerSize / 2, markerSize / 2, 0));
     modelMarker.push_back(cv::Point3f(markerSize / 2, markerSize / 2, 0));
     modelMarker.push_back(cv::Point3f(markerSize / 2, -markerSize / 2, 0));
@@ -874,7 +1006,7 @@ void Tracker::CalibrateTracker()
         }
         */
 
-        float maxDist = parameters->trackerCalibDistance;
+        float maxDist = static_cast<float>(parameters->trackerCalibDistance);
 
         for (int i = 0; i < boardIds.size(); i++)           //for each of the trackers
         {
@@ -954,7 +1086,7 @@ void Tracker::CalibrateTracker()
                         }
                         if (listIndex < 0)                  //if not, add and initialize it
                         {
-                            listIndex = idsList.size();
+                            listIndex = static_cast<int>(idsList.size());
                             idsList.push_back(ids[j]);
                             cornersList.push_back(std::vector<std::vector<cv::Point3f>>());
                         }
@@ -1011,7 +1143,11 @@ void Tracker::CalibrateTracker()
 void Tracker::MainLoop()
 {
 
-    int trackerNum = connection->connectedTrackers.size();
+    size_t trackerNum;
+
+    if (NO_STEAM_MODE) trackerNum = parameters->trackerNum; 
+    else trackerNum = connection->connectedTrackers.size();
+
     int numOfPrevValues = parameters->numOfPrevValues;
 
     //these variables are used to save detections of apriltags, so we dont define them every frame
@@ -1021,7 +1157,9 @@ void Tracker::MainLoop()
     std::vector<cv::Point2f> centers;
 
 
-    cv::Mat image, drawImg, ycc, gray, cr;
+    cv::Mat image = cv::Mat(parameters->camHeight, parameters->camWidth, CV_8UC3, cv::Scalar(0, 0, 0)),
+            drawImg,
+            gray = cv::Mat(parameters->camHeight, parameters->camWidth, CV_8U, cv::Scalar(0));
 
     cv::Mat  prevImg;
 
@@ -1045,7 +1183,7 @@ void Tracker::MainLoop()
         prevLocValuesX.push_back(j);
     }
 
-
+    
     AprilTagWrapper april{parameters};
 
     int framesSinceLastSeen = 0;
@@ -1060,7 +1198,8 @@ void Tracker::MainLoop()
     double b = stationPos.at<double>(1, 0);
     double c = -stationPos.at<double>(2, 0);
 
-    connection->SendStation(0, a, b, c, stationQ.w, stationQ.x, stationQ.y, stationQ.z);
+    if (!NO_STEAM_MODE) 
+        connection->SendStation(0, a, b, c, stationQ.w, stationQ.x, stationQ.y, stationQ.z);
 
     bool calibControllerPosActive = false;
     bool calibControllerAngleActive = false;
@@ -1116,11 +1255,15 @@ void Tracker::MainLoop()
 
     while (mainThreadRunning && cameraRunning)
     {
-
-        CopyFreshCameraImageTo(image);
-
-        drawImg = image;
-        april.convertToSingleChannel(image, gray);
+        if (parameters->useApriltagIOS) {
+            image = cv::Scalar(0, 0, 0);
+            drawImg = image;
+            gray = cv::Scalar(0);
+        } else {
+            CopyFreshCameraImageTo(image);
+            drawImg = image;
+            april.convertToSingleChannel(image, gray);
+        }
 
         clock_t start, end;
         //for timing our detection
@@ -1141,6 +1284,7 @@ void Tracker::MainLoop()
         if (!circularWindow)
             framesSinceLastSeen = 0;
 
+        if (!NO_STEAM_MODE) {
         for (int i = 0; i < trackerNum; i++)
         {
 
@@ -1200,7 +1344,7 @@ void Tracker::MainLoop()
                 tvec[1] = rpos.at<double>(1, 0);
                 tvec[2] = rpos.at<double>(2, 0);
 
-                cv::aruco::drawAxis(drawImg, parameters->camMat, parameters->distCoeffs, rvec, tvec, 0.10);
+                cv::aruco::drawAxis(drawImg, parameters->camMat, parameters->distCoeffs, rvec, tvec, 0.10f);
 
                 if (!trackerStatus[i].boardFound)
                 {
@@ -1229,17 +1373,18 @@ void Tracker::MainLoop()
             }
 
         }
-
+        }
         //Then define your mask image
         cv::Mat mask = cv::Mat::zeros(gray.size(), gray.type());
 
         cv::Mat dstImage = cv::Mat::zeros(gray.size(), gray.type());
 
-        int size = gray.rows * parameters->searchWindow;
+        int size = static_cast<int>(std::trunc(gray.rows * parameters->searchWindow));
 
         bool doMasking = false;
 
         //I assume you want to draw the circle at the center of your image, with a radius of 50
+        if (!NO_STEAM_MODE) {
         for (int i = 0; i < trackerNum; i++)
         {
             if (trackerStatus[i].maskCenter.x <= 0 || trackerStatus[i].maskCenter.y <= 0 || trackerStatus[i].maskCenter.x >= image.cols || trackerStatus[i].maskCenter.y >= image.rows)
@@ -1255,9 +1400,10 @@ void Tracker::MainLoop()
             }
             else
             {
-                rectangle(mask, cv::Point(trackerStatus[i].maskCenter.x - size, 0), cv::Point(trackerStatus[i].maskCenter.x + size, image.rows), cv::Scalar(255, 0, 0), -1);
-                rectangle(drawImg, cv::Point(trackerStatus[i].maskCenter.x - size, 0), cv::Point(trackerStatus[i].maskCenter.x + size, image.rows), cv::Scalar(255, 0, 0), 3);
+                rectangle(mask, cv::Point(static_cast<int>(std::trunc(trackerStatus[i].maskCenter.x - size)), 0), cv::Point(static_cast<int>(std::trunc(trackerStatus[i].maskCenter.x + size)), image.rows), cv::Scalar(255, 0, 0), -1);
+                rectangle(drawImg, cv::Point(static_cast<int>(std::trunc(trackerStatus[i].maskCenter.x - size)), 0), cv::Point(static_cast<int>(std::trunc(trackerStatus[i].maskCenter.x + size)), image.rows), cv::Scalar(255, 0, 0), 3);
             }
+        }
         }
 
         //Now you can copy your source image to destination image with masking
@@ -1268,7 +1414,7 @@ void Tracker::MainLoop()
         }
 
         //cv::imshow("test", image);
-
+        if (!NO_STEAM_MODE) {
         if (manualRecalibrate)
         {
             int inputButton = 0;
@@ -1417,7 +1563,18 @@ void Tracker::MainLoop()
         {
             calibControllerLastPress = clock();
         }
-        april.detectMarkers(gray, &corners, &ids, &centers, trackers);
+        }
+        
+        if (parameters->useApriltagIOS) {
+            std::lock_guard<std::mutex> lock(server.mutex);
+            ids = server.ids;
+            corners = server.corners; // hopefully this copies everything
+            centers = server.centers;
+        } else {
+            april.detectMarkers(gray, &corners, &ids, &centers, trackers);
+        }
+
+        if (!NO_STEAM_MODE) {
         for (int i = 0; i < trackerNum; ++i) {
 
             //estimate the pose of current board
@@ -1616,6 +1773,7 @@ void Tracker::MainLoop()
             }
 
 
+        }
         }
 
         if (ids.size() > 0)

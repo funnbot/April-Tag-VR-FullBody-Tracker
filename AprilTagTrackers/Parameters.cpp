@@ -106,6 +106,7 @@ void Parameters::Load()
         fs["markerLibrary"] >> markerLibrary;
         fs["languageSelection"] >> languageSelection;
         fs["calibScale"] >> calibScale;
+        fs["useApriltagIOS"] >> useApriltagIOS;
         if (calibScale < 0.5)
             calibScale = 1;
         if(!wrotmat.empty())
@@ -227,6 +228,7 @@ void Parameters::Save()
     fs << "markerLibrary" << markerLibrary;
     fs << "languageSelection" << languageSelection;
     fs << "calibScale" << calibScale;
+    fs << "useApriltagIOS" << useApriltagIOS;
 
     fs << "trackers";
     fs << "{";

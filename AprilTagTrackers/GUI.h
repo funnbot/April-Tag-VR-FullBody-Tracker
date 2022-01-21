@@ -169,6 +169,7 @@ private:
     wxTextCtrl* additionalSmoothingField;
     wxChoice* markerLibraryField;
     wxChoice* languageField;
+    wxCheckBox* useApriltagIOSField;
 
     void SaveParams(wxCommandEvent&);
     void ShowHelp(wxCommandEvent&);

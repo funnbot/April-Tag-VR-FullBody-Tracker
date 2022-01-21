@@ -7,6 +7,8 @@
 //#include "Language_English.h"
 #include "Language.h"
 
+const bool USE_UDP = true;
+
 class Parameters
 {
 public:
@@ -66,6 +68,7 @@ public:
     int markersPerTracker = 45;
     int languageSelection = 0;
     double calibScale = 1;
+    bool useApriltagIOS = false;
 
 
     cv::Ptr<cv::aruco::DetectorParameters> aruco_params = cv::aruco::DetectorParameters::create();

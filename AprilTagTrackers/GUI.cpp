@@ -176,6 +176,7 @@ ParamsPage::ParamsPage(wxNotebook* parent, Parameters* params, Connection* conn)
     , trackerCalibCentersField(new wxCheckBox(this, -1, wxT("")))
     , depthSmoothingField(new wxTextCtrl(this, -1, std::to_string(parameters->depthSmoothing)))
     , additionalSmoothingField(new wxTextCtrl(this, -1, std::to_string(parameters->additionalSmoothing)))
+    , useApriltagIOSField(new wxCheckBox(this, -1, wxT("")))
 {
     //usePredictiveField->SetValue(parameters->usePredictive);
     ignoreTracker0Field->SetValue(parameters->ignoreTracker0);
@@ -186,6 +187,7 @@ ParamsPage::ParamsPage(wxNotebook* parent, Parameters* params, Connection* conn)
     //chessboardCalibField->SetValue(parameters->chessboardCalib);
     settingsParametersField->SetValue(parameters->settingsParameters);
     trackerCalibCentersField->SetValue(parameters->trackerCalibCenters);
+    useApriltagIOSField->SetValue(parameters->useApriltagIOS);
 
     wxArrayString markerLibraryValues;
     markerLibraryValues.Add(wxT("ApriltagStandard"));
@@ -279,6 +281,8 @@ ParamsPage::ParamsPage(wxNotebook* parent, Parameters* params, Connection* conn)
     fgs->Add(depthSmoothingField);
     addTextWithTooltip(this, fgs, params->language.PARAMS_SMOOTHING_NAME_CAM_LATENCY, params->language.PARAMS_SMOOTHING_TOOLTIP_CAM_LATENCY);
     fgs->Add(camLatencyField);
+    addTextWithTooltip(this, fgs, "Use Apriltag IOS", "Connect to the UDP server from apriltag IOS, calibrate the camera using another method first.");
+    fgs->Add(useApriltagIOSField);
 
 
     fgs->Add(new wxStaticText(this, -1, wxT("")));
@@ -361,6 +365,7 @@ void ParamsPage::SaveParams(wxCommandEvent& event)
         parameters->markerLibrary = markerLibraryField->GetSelection();
         int prevLanguage = parameters->languageSelection;
         parameters->languageSelection = languageField->GetSelection();
+        parameters->useApriltagIOS = useApriltagIOSField->GetValue();
         parameters->Save();
 
         if (parameters->depthSmoothing > 1)
